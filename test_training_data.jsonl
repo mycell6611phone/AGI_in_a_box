@@ -1,0 +1,3 @@
+{"instruction": "What is the capital of France?", "response": "The capital of France is Paris."}
+{"instruction": "How do you reverse a list in Python?", "response": "You can use list.reverse() or list[::-1]."}
+{"instruction": "Explain the significance of the moon landing.", "response": "The 1969 moon landing demonstrated technological superiority during the Cold War and marked humanity's first steps on another celestial body."}

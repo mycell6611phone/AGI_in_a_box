@@ -1,0 +1,65 @@
+import asyncio
+import sys            # ← added
+import argparse
+import logging
+import traceback
+from debate_controller import DebateController
+
+# ---------- logging setup ----------
+def _setup_logging(verbose: bool):
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+        handlers=[
+            logging.FileHandler("system_debug.log"),
+            logging.StreamHandler()
+        ]
+    )
+# ------------------------------------
+
+async def main():
+    parser = argparse.ArgumentParser(description="Build a module chunk via debate")
+    parser.add_argument("module_name")
+    parser.add_argument("--verbose", action="store_true", help="Enable DEBUG logging")
+    args = parser.parse_args()
+
+    # you can keep sys.argv[1] or switch to args.module_name
+    module_name = sys.argv[1]
+    # module_name = args.module_name      # (cleaner—up to you)
+
+    with open(f"./prompts/{module_name}.txt", "r") as f:
+        prompt = f.read()
+
+    controller = DebateController()
+    await controller.run_debate(module_name, prompt)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+# === token_budget.py ===
+import json
+import os
+
+BUDGET_FILE = "token_log.json"
+MAX_TOKENS = 128000
+
+if not os.path.exists(BUDGET_FILE):
+    with open(BUDGET_FILE, "w") as f:
+        json.dump({"used_tokens": 0}, f)
+
+def check_token_limit(prompt):
+    with open(BUDGET_FILE, "r") as f:
+        data = json.load(f)
+    if len(prompt.split()) + data["used_tokens"] > MAX_TOKENS:
+        return False
+    return True
+
+def log_tokens(used):
+    with open(BUDGET_FILE, "r") as f:
+        data = json.load(f)
+    data["used_tokens"] += used
+    with open(BUDGET_FILE, "w") as f:
+        json.dump(data, f)
+

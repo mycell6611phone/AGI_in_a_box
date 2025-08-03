@@ -1,0 +1,246 @@
+diff --git a/build_chunk.py b/build_chunk.py
+@@
+-import asyncio
+-import sys
+-from debate_controller import DebateController
++import asyncio
++import argparse
++import logging
++import traceback
++from debate_controller import DebateController
++
++# ------- logging setup -------
++def _setup_logging(verbose: bool):
++    level = logging.DEBUG if verbose else logging.INFO
++    logging.basicConfig(
++        level=level,
++        format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
++        handlers=[
++            logging.FileHandler("system_debug.log"),
++            logging.StreamHandler()
++        ]
++    )
+ 
+-async def main():
+-    if len(sys.argv) != 2:
+-        print("Usage: python3 build_chunk.py <module_name>")
+-        return
+-
+-    module_name = sys.argv[1]
++async def main():
++    parser = argparse.ArgumentParser(description="Build a module chunk via debate")
++    parser.add_argument("module_name")
++    parser.add_argument("--verbose", action="store_true", help="Enable DEBUG logging")
++    args = parser.parse_args()
++
++    _setup_logging(args.verbose)
++    logger = logging.getLogger("build_chunk")
++
++    module_name = args.module_name
+     with open(f"./prompts/{module_name}.txt", "r") as f:
+         prompt = f.read()
+ 
+     controller = DebateController()
+-    await controller.run_debate(module_name, prompt)
++    try:
++        await controller.run_debate(module_name, prompt)
++    except Exception as e:
++        logger.error("Unhandled exception while running debate", exc_info=e)
+ 
+ if __name__ == "__main__":
+     asyncio.run(main())
++
++# -----------------------------------------------------------------------------
++
+
+diff --git a/debate_controller.py b/debate_controller.py
+@@
+-import asyncio
+-import json
+-from llm_client import call_local_model
+-from gpt4o_client import call_gpt4o
+-from token_budget import check_token_limit, log_tokens
+-from tool_call_router import write_file, run_shell
++import asyncio
++import json
++import logging
++from datetime import datetime
++
++from llm_client import call_local_model
++from gpt4o_client import call_gpt4o
++from token_budget import check_token_limit, log_tokens
++from tool_call_router import write_file, run_shell
++
++logger = logging.getLogger("DebateController")
+@@
+-    def __init__(self):
+-        self.chunk_history = {}
++    def __init__(self):
++        self.chunk_history = {}
++        logger.debug("DebateController initialised")
+@@
+-        print(f"[DebateController] Starting debate for module: {module_name}")
++        logger.info("Starting debate for module: %s", module_name)
+@@
+-        print("[DebateController] Prompting local models...")
++        logger.debug("Prompting local models…")
+@@
+-        print("[DebateController] Forwarding results to GPT-4o...")
++        logger.debug("Forwarding results to GPT‑4o…")
+@@
+-            raise RuntimeError("Token limit exceeded for GPT-4o input")
++            raise RuntimeError("Token limit exceeded for GPT‑4o input")
+@@
+-        print(f"[DebateController] Best version written to {filename}")
++        logger.info("Best version written to %s", filename)
+@@
+-        return best_version
++        self._dump_status(module_name)
++        return best_version
++
++    # ------------------------- helper utilities -----------------------------
++
++    def _dump_status(self, current_module: str):
++        """Write minimal runtime status for external monitoring."""
++        status = {
++            "timestamp": datetime.utcnow().isoformat(),
++            "current_module": current_module,
++            "chunks_built": len(self.chunk_history)
++        }
++        try:
++            with open("runtime_status.json", "w") as fp:
++                json.dump(status, fp, indent=2)
++            logger.debug("Status file updated")
++        except Exception as e:
++            logger.error("Failed to write status file", exc_info=e)
++
++# -----------------------------------------------------------------------------
++
+
+diff --git a/goal_manager-1.py b/goal_manager.py
+@@
+-import uuid
+-from datetime import datetime
++import uuid
++from datetime import datetime
++import logging
++
++logger = logging.getLogger("GoalManager")
+@@
+-        print("[GoalManager] Initialized goal tracker")
++        logger.info("GoalManager initialised")
+@@
+-        print(f"[GoalManager] Added goal: {goal_id}")
++        logger.info("Added goal %s", goal_id)
+@@
+-            print(f"[GoalManager] Goal completed: {goal_id}")
++            logger.info("Goal %s marked completed", goal_id)
++
++# -----------------------------------------------------------------------------
++
+
+diff --git a/llm_client.py b/llm_client.py
+@@
+-import aiohttp
++import aiohttp
++import logging
++
++logger = logging.getLogger("LLMClient")
+@@
+-    async with aiohttp.ClientSession() as session:
+-        async with session.post(API_URL, headers=headers, json=payload) as resp:
+-            if resp.status != 200:
+-                raise RuntimeError(f"Local LLM error {resp.status}: {await resp.text()}")
+-            result = await resp.json()
+-            return result["choices"][0]["message"]["content"]
++    try:
++        async with aiohttp.ClientSession() as session:
++            async with session.post(API_URL, headers=headers, json=payload) as resp:
++                if resp.status != 200:
++                    err = await resp.text()
++                    logger.error("Local LLM error %s: %s", resp.status, err)
++                    raise RuntimeError(f"Local LLM error {resp.status}: {err}")
++                result = await resp.json()
++                content = result["choices"][0]["message"]["content"]
++                logger.debug("local model (%s) returned %d chars", model, len(content))
++                return content
++    except Exception as e:
++        logger.error("Exception during call_local_model", exc_info=e)
++        raise
++
++# -----------------------------------------------------------------------------
++
+
+diff --git a/gpt4o_client.py b/gpt4o_client.py
+@@
+-import aiohttp
+-import os
+-import time
+-import tiktoken
++import aiohttp
++import os
++import time
++import logging
++import tiktoken
++
++logger = logging.getLogger("GPT4oClient")
+@@
+-                        result = await resp.json()
+-                        content = result["choices"][0]["message"]["content"]
+-                        tokens = count_tokens(prompt + content)
+-                        return content, tokens
+-                    else:
+-                        raise RuntimeError(f"OpenAI error {resp.status}: {await resp.text()}")
++                        result = await resp.json()
++                        content = result["choices"][0]["message"]["content"]
++                        tokens = count_tokens(prompt + content)
++                        return content, tokens
++                    else:
++                        err = await resp.text()
++                        logger.error("OpenAI error %s: %s", resp.status, err)
++                        raise RuntimeError(f"OpenAI error {resp.status}: {err}")
+@@
+-        except Exception as e:
+-            print(f"[GPT-4o Retry {attempt+1}] {e}")
++        except Exception as e:
++            logger.warning("GPT‑4o retry %d failed", attempt + 1, exc_info=e)
+@@
+-    raise RuntimeError("GPT-4o request failed after retries")
++    logger.error("GPT‑4o request failed after %d retries", retries)
++    raise RuntimeError("GPT‑4o request failed after retries")
++
++# -----------------------------------------------------------------------------
++
+
+diff --git a/tool_call_router.py b/tool_call_router.py
+@@
+-import os
+-import subprocess
++import os
++import subprocess
++import logging
++
++logger = logging.getLogger("ToolCallRouter")
+@@
+-def write_file(filepath: str, content: str):
+-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+-    with open(filepath, "w") as f:
+-        f.write(content)
+-    print(f"[FileWriter] Wrote to {filepath}")
++def write_file(filepath: str, content: str):
++    os.makedirs(os.path.dirname(filepath), exist_ok=True)
++    with open(filepath, "w") as f:
++        f.write(content)
++    logger.debug("Wrote file %s", filepath)
+@@
+-        output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+-        return output.decode()
++        output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
++        return output.decode()
+     except subprocess.CalledProcessError as e:
+-        return f"[ShellError] {e.output.decode()}"
++        logger.error("ShellError while running '%s'", command, exc_info=e)
++        return f"[ShellError] {e.output.decode()}"
++
++# -----------------------------------------------------------------------------
++

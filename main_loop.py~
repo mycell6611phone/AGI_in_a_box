@@ -1,0 +1,118 @@
+import time
+import json
+import openai
+from gpt_planner import API_URL, MODEL, SYSTEM_PROMPT  # ensure you have your full SYSTEM_PROMPT here
+from executor import execute_plan
+from retry_handler import RetryHandler
+from feedback_logger import FeedbackLogger
+from tool_call_router import AGENT     # ← import your registry
+
+class MainLoop:
+    def __init__(self):
+        self.retry_handler = RetryHandler()
+        self.logger = FeedbackLogger()
+
+    def run_once(self, user_input: str):
+        # 0) Persist the user’s goal (safe–guarded)
+        try:
+            ack = TOOLS["log_goal"](user_input)
+        except Exception as e:
+            ack = f"[Error] log_goal failed: {e}"
+        print(ack)
+
+        # 1) Fetch all goals so far (safe–guarded)
+        try:
+            current = TOOLS["get_goals"]()
+        except Exception as e:
+            current = f"[Error] get_goals failed: {e}"
+        print(f"[GoalManager] Goals so far:\n{current}")
+
+       
+
+         convo = [
+          {"role": "system",      "content": SYSTEM_PROMPT},
+          {"role": "assistant",   "name": "agents", 
+                                 "content": get_goals(current)},    # <-- function result as content
+          {"role": "user",        "content": user_input}
+      ]
+
+
+        # 2) Loop until we get a valid plan (JSON list) or unrecoverable halt
+        plan = None
+        while True:
+            # Ask GPT (brain) for next action
+           resp  = openai.chat.completions.create(model=MODEL, messages=convo)
+           reply = resp.choices[0].message.content.strip()
+
+            # Try parsing JSON
+           try:
+               payload = json.loads(reply)
+           except json.JSONDecodeError:
+               # Send the raw GPT reply back so it can adjust
+               convo.append({"role":"error", "content": f"Invalid JSON: {reply}"})
+               continue
+
+            # If GPT is calling a tool...
+               if isinstance(payload, dict) and "tool" in payload:
+                   fn   = TOOLS.get(payload["tool"])
+                   args = payload.get("args", {})
+               if fn is None:
+                   convo.append({"role":"assistant", "content": f"[{agent} ERROR] unknown tool"})
+                   continue
+               try:
+                   result = fn(**args)
+               except Exception as e:
+                   convo.append({"role":"assistant", "content": f"[{agent} ERROR] {e}"})
+                   continue
+               # feed result back as an assistant message
+                   convo.append({
+                    "role": "assistant",
+                    "content": f"[{agent}] {result}"
+                })
+               continue
+
+               # Attempt to invoke the tool
+               try:
+                   result = fn(**args)
+               except Exception as e:                    # Pass the exception back into GPT
+                   convo.append("role":"error", "content": ({f"Error in {agent}: {e}"}))
+                   continue
+                # Feed the tool result back into the convo
+               convo.append({"role":"agent", "name":agent, "content": str(result)})
+               continue
+
+            # If GPT returned a plan (list of steps), break out
+           if isinstance(payload, list):
+               plan = payload
+               break
+
+            # Anything else: ask GPT to clarify
+           convo.append({"role":"error", "content": f"Unexpected payload: {payload}"})
+
+        # 3) Execute the plan, with broad exception handling
+        print(f"[MainLoop] Executing {len(plan)} steps…")
+        try:
+            execute_plan(plan)
+        except Exception as e:
+            # Send execution errors back into GPT for repair
+            convo.append({"role":"error", "content": f"Execution failed: {e}"})
+            # Let GPT re-enter planning/recovery phase
+            return self.run_once(user_input)
+
+        # 4) Summarize & retry as before
+        print("[MainLoop] Summary:")
+        for line in self.logger.summarize():
+            print("-", line)
+        print("[MainLoop] Checking for failures…")
+        self.retry_handler.retry_failed()
+
+if __name__ == "__main__":
+    loop = MainLoop()
+    print("[MainLoop] Ready. Type a system-level request or 'exit'.")
+    while True:
+        ui = input("\n>> ")
+        if ui.strip().lower() in {"exit","quit"}:
+            break
+        loop.run_once(ui)
+        time.sleep(1)
+

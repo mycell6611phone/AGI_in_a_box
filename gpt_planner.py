@@ -1,0 +1,83 @@
+import os
+import json
+import time
+import dotenv
+import openai
+from executor import Executor, execute_plan
+from memory_recaller import MemoryRecaller
+
+# === LOAD API KEY ===
+dotenv.load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# === CONFIG ===
+API_URL = "https://api.openai.com/v1/chat/completions"
+MODEL = "gpt-4"
+SYSTEM_PROMPT = """
+You are the autonomous AGI “brain.” You plan every step and use tools as needed.
+Your operating on POP OS 
+You have access to these tools:
+  • run_shell(command: str)
+  • write_file(path: str, content: str)
+  • search_local_files(query: str)
+  • read_file(path: str)
+  • search_localdocs(query: str)
+  • log_goals(goal: str)   → record any goals in the persistent store.
+  • get_goals()           → retrieve all recorded goals.
+
+When you receive the user request:
+1) Call `log_goal` once to persist it (or its sub-goals).
+2) You may call `get_goals` at any time to remind yourself of current objectives.
+3) Finally, output a JSON list of executable steps:
+   [
+     { "type":"shell", "content":"…" },
+     { "type":"file",  "path":"…", "content":"…" }
+   ]
+Respond *only* with valid JSON (either a tool-call or the final plan list)."""
+
+
+
+executor = Executor()
+recaller = MemoryRecaller()
+
+def ask_gpt_for_plan(user_input):
+    print("[Planner] Sending prompt to GPT...")
+    response = openai.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": user_input}
+        ]
+    )
+    reply = response.choices[0].message.content
+    try:
+        plan = json.loads(reply)
+        print(f"[Planner] GPT returned {len(plan)} steps.")
+        return plan
+    except json.JSONDecodeError:
+        print("[Planner] Failed to parse GPT response:", reply)
+        return []
+
+def run_planner(user_input):
+    recalled_plan = recaller.recall_plan(user_input)
+    if recalled_plan:
+        print("[Planner] Recalled plan from memory.")
+        execute_plan(recalled_plan)
+        return
+
+    print("[Planner] Asking GPT for plan...")
+    plan = ask_gpt_for_plan(user_input)
+    if plan:
+        execute_plan(plan)
+    else:
+        print("[Planner] GPT did not return a valid plan.")
+
+if __name__ == "__main__":
+    print("[GPT Planner] Ready. Type a goal or 'exit':")
+    while True:
+        user_input = input("\n>> ")
+        if user_input.strip().lower() in {"exit", "quit"}:
+            break
+        run_planner(user_input)
+        time.sleep(1)
+

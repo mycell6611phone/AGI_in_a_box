@@ -1,0 +1,142 @@
+# debate_filter_extended.py
+
+import json
+import os
+from datetime import datetime
+from local_llm import call_local_model
+
+INPUT_FILE = "test_training_data.jsonl"
+OUTPUT_VERIFIED = "debate_output_verified.jsonl"
+OUTPUT_UNVERIFIED = "debate_output_unverified.jsonl"
+
+MODEL_A = "Mistral Instruct"
+MODEL_B = "Reasoner v1"
+JUDGE_MODEL = "Llama 3.1 8B Instruct 128k"
+MAX_ROUNDS = 3
+
+SYSTEM_PROMPT = """
+You are an advanced self-improving AI. Your goal is to select only the best data to fine-tune future versions of yourself. 
+Evaluate the following instruction-response pair for accuracy, usefulness, and clarity.
+
+Respond with this format:
+DECISION: [ACCEPT|REJECT]
+JUSTIFICATION: <clear, technical reasoning>
+"""
+
+def score_and_justify(model_name, instruction, response, prior_opinion=None):
+    prompt = SYSTEM_PROMPT + f"""
+Instruction:
+{instruction}
+
+Response:
+{response}
+"""
+    if prior_opinion:
+        prompt += f"\nOther model's opinion: {prior_opinion}\n"
+
+    reply = call_local_model(prompt.strip(), model_name)
+    lines = reply.strip().split("\n")
+    decision = "REJECT"
+    justification = reply.strip()
+
+    for line in lines:
+        if "DECISION:" in line:
+            decision = line.split("DECISION:")[-1].strip().upper()
+        if "JUSTIFICATION:" in line:
+            justification = line.split("JUSTIFICATION:")[-1].strip()
+            break
+
+    return decision, justification
+
+def judge_disagreement(instruction, response, a_reason, b_reason):
+    prompt = f"""
+Instruction:
+{instruction}
+
+Response:
+{response}
+
+Model A justification:
+{a_reason}
+
+Model B justification:
+{b_reason}
+
+Should this example be included in a fine-tuning dataset? Justify your answer and conclude with YES or NO.
+"""
+    reply = call_local_model(prompt.strip(), JUDGE_MODEL)
+    return reply.strip()
+
+def debate_filter(input_path, verified_out, unverified_out):
+    print("[DebateFilter] Starting extended debate filter...")
+    kept, skipped, unresolved = 0, 0, 0
+
+    with open(input_path, "r") as infile, \
+         open(verified_out, "w") as goodfile, \
+         open(unverified_out, "w") as badfile:
+
+        for line in infile:
+            example = json.loads(line)
+            instr, resp = example["instruction"], example["response"]
+            debate_log = []
+
+            for round_num in range(1, MAX_ROUNDS + 1):
+                decision_a, reason_a = score_and_justify(MODEL_A, instr, resp)
+                decision_b, reason_b = score_and_justify(MODEL_B, instr, resp, reason_a)
+
+                debate_log.append({
+                    "round": round_num,
+                    "a": decision_a + ": " + reason_a,
+                    "b": decision_b + ": " + reason_b
+                })
+
+                if decision_a == decision_b:
+                    final = decision_a
+                    break
+            else:
+                verdict = judge_disagreement(instr, resp, reason_a, reason_b)
+                if "yes" in verdict.lower():
+                    final = "ACCEPT"
+                    reason = verdict
+                elif "no" in verdict.lower():
+                    final = "REJECT"
+                    reason = verdict
+                else:
+                    final = "UNVERIFIED"
+                    reason = verdict
+
+            output = {
+                "instruction": instr,
+                "response": resp,
+                "result": final.lower(),
+                "score_a": decision_a,
+                "score_b": decision_b,
+                "final_score": 10 if final == "ACCEPT" else 1,
+                "justification_a": reason_a,
+                "justification_b": reason_b,
+                "judge_reasoning": reason if 'reason' in locals() else None,
+                "debate_log": debate_log,
+                "metadata": {
+                    "model_a": MODEL_A,
+                    "model_b": MODEL_B,
+                    "judge_model": JUDGE_MODEL,
+                    "scored_at": datetime.now().isoformat()
+                }
+            }
+
+            if final == "ACCEPT":
+                goodfile.write(json.dumps(output) + "\n")
+                kept += 1
+            elif final == "REJECT":
+                skipped += 1
+            else:
+                badfile.write(json.dumps(output) + "\n")
+                unresolved += 1
+
+    print(f"[DebateFilter] Accepted: {kept}, Rejected: {skipped}, Unverified: {unresolved}")
+
+if __name__ == "__main__":
+    if not os.path.exists(INPUT_FILE):
+        print("[Error] Input file not found.")
+    else:
+        debate_filter(INPUT_FILE, OUTPUT_VERIFIED, OUTPUT_UNVERIFIED)

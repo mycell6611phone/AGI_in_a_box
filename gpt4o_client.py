@@ -1,0 +1,52 @@
+import aiohttp
+import os
+import time
+import tiktoken
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+
+API_URL = "https://api.openai.com/v1/chat/completions"
+API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL = "gpt-4o"
+
+if not API_KEY:
+    raise EnvironmentError("Missing OPENAI_API_KEY in environment")
+
+def count_tokens(text: str) -> int:
+    encoding = tiktoken.encoding_for_model(MODEL)
+    return len(encoding.encode(text))
+
+async def call_gpt4o(prompt: str) -> tuple[str, int]:
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a senior AI engineer optimizing LLM code."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "stream": False
+    }
+
+    retries = 3
+    for attempt in range(retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL, headers=headers, json=payload) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        content = result["choices"][0]["message"]["content"]
+                        tokens = count_tokens(prompt + content)
+                        return content, tokens
+                    else:
+                        raise RuntimeError(f"OpenAI error {resp.status}: {await resp.text()}")
+        except Exception as e:
+            print(f"[GPT-4o Retry {attempt+1}] {e}")
+            time.sleep(2)
+
+    raise RuntimeError("GPT-4o request failed after retries")

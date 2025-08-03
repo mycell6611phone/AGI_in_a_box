@@ -1,0 +1,85 @@
+SYSTEM DESIGN CONCEPTS
+
+    GPT as the Planner: Use GPT-4o to handle all planning, architecture, debugging, tool generation, and adaptation. Never rely on the user for technical skill.
+
+    Local LLMs as Executors: Offload tool calls, memory searches, file writes, and summaries to small, fast, local models.
+
+    User-Goal Driven: Let the user state goals in natural language. GPT plans the solution and orchestrates execution through local components.
+
+🔌 TOOL DESIGN AND INTERFACE
+
+    Schema-Validated Tool Calls: All tools must be invoked using strict ToolCallSpec structures (name, arguments) to prevent errors and misuse.
+
+    Descriptive Tool Naming: Use names like extract_logs() instead of tool_17 to reduce the need for explanations in prompts.
+
+    Expandable Tool Prompts: Inject only tool names/syntax into GPT's prompt. Let GPT ask for full details (describe_tool()) if needed.
+
+    Token-Efficient Tool Manifest: Design prompt injection to minimize token cost by tiering tool metadata.
+
+💾 MEMORY STRATEGY
+
+    Structured Long-Term Memory: Use PostgreSQL + pgvector to store GPT-facing memory with metadata (certainty, tags, timestamps, importance).
+
+    Semantic Short-Term Recall: Use FAISS or local LLM vector memory for active task recall and fast fuzzy lookup.
+
+    Summarized Prompts Only: Don’t inject raw logs or memory into GPT—summarize via local LLM first.
+
+    Memory Filtering by Request: Let GPT ask for specific memory types or tags rather than loading everything every round.
+
+💬 TOKEN OPTIMIZATION & EFFICIENCY
+
+    No Hard Limit, Just Control: Don’t cap token input, but always justify input token cost.
+
+    Tiered Prompt Structure:
+
+        Inject tool list
+
+        Inject current goal + last result
+
+        Add memory summary only if flagged
+
+    Let GPT Request Context: Build GPT prompts to assume "just enough context," and let it explicitly ask for more.
+
+🔁 GPT EXECUTION LOOP
+
+    Step-Based Planning: GPT creates one or more steps per goal, submits to a loop.
+
+    ExecutionResult Reporting: Local LLM returns status, memory updates, and logs via schema.
+
+    Loop Until Completion or Manual Stop: GPT decides when a goal is done or needs escalation.
+
+🔐 SAFETY, RELIABILITY, AND CONTROL
+
+    All Code Verified: GPT must confirm code changes with {"status":"ok"} or rerun/refactor.
+
+    Sandbox User Interaction: Let the user see and control the system—but never give write access to system code or shell.
+
+    Controlled File Writes: All changes go through a write_file(path, content) interface with logging.
+
+    Recovery Engine: If a component breaks, GPT can use its own build logs or prompt to regenerate it safely.
+
+💡 LOCAL LLM UTILIZATION
+
+    Log Summarization
+
+    Tool Usage Execution
+
+    Memory Filtering and Formatting
+
+    On-demand Help Response ("describe_tool")
+
+    Execution Proxy for GPT
+
+🛠️ PRODUCT STRATEGY ELEMENTS
+
+    Built on Other Manufacturer Hardware
+
+    GPT-Driven OS/Agent Preinstalled
+
+    No Coding Needed for End User
+
+    Sell as Plug-and-Play Automation System
+
+    Provide Support, Add-Ons, and Upgrades
+
+    Mutual Value for OpenAI, Hardware Vendors, You, and Customers

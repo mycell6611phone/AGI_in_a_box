@@ -1,0 +1,28 @@
+diff --git a/build_chunk.py b/build_chunk.py
+--- a/build_chunk.py
++++ b/build_chunk.py
+@@
+-import asyncio
+-import sys
+-from debate_controller import DebateController
++import asyncio
++import argparse
++import logging
++import traceback
++from debate_controller import DebateController
++
++# ------- logging setup -------
++def _setup_logging(verbose: bool):
++    level = logging.DEBUG if verbose else logging.INFO
++    logging.basicConfig(
++        level=level,
++        format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
++        handlers=[
++            logging.FileHandler("system_debug.log"),
++            logging.StreamHandler()
++        ]
++    )
+...
+# (keep pasting until the very last line of the diff)
+...
+ # -----------------------------------------------------------------------------

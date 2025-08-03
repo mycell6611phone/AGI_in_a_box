@@ -1,0 +1,103 @@
+import subprocess
+import os
+import uuid
+import json
+from datetime import datetime
+
+class Executor:
+    """
+    Executes shell commands, applies file patches, and logs every action.
+    Acts as a surrogate for a human operator following GPT's instructions.
+    """
+    def __init__(self, log_dir="execution_logs", dry_run=False):
+        self.log_dir = log_dir
+        self.dry_run = dry_run
+        os.makedirs(log_dir, exist_ok=True)
+        self.session_id = str(uuid.uuid4())
+        self.log_path = os.path.join(log_dir, f"session_{self.session_id}.json")
+        self.log = []
+
+    def run_shell(self, command, require_confirm=False):
+        if require_confirm:
+            print(f"[Executor] Confirm before executing: {command}")
+            return {"status": "waiting", "command": command}
+
+        print(f"[Executor] Running: {command}")
+        if self.dry_run:
+            result = {"stdout": "[dry run]", "stderr": "", "code": 0}
+        else:
+            try:
+                completed = subprocess.run(
+                    command, shell=True, text=True, capture_output=True
+                )
+                result = {
+                    "stdout": completed.stdout,
+                    "stderr": completed.stderr,
+                    "code": completed.returncode,
+                }
+            except Exception as e:
+                result = {"stdout": "", "stderr": str(e), "code": -1}
+
+        self._log_action("shell", command, result)
+        return result
+
+    def apply_patch(self, filepath, new_content, require_backup=True):
+        if not os.path.exists(filepath):
+            return {"status": "error", "message": f"File not found: {filepath}"}
+
+        backup_path = None
+        if require_backup:
+            backup_path = f"{filepath}.bak.{datetime.now():%Y%m%d%H%M%S}"
+            os.rename(filepath, backup_path)
+
+        with open(filepath, "w") as f:
+            f.write(new_content)
+
+        self._log_action(
+            "file_patch",
+            filepath,
+            {"backup": backup_path, "status": "success"},
+        )
+        return {"status": "success", "filepath": filepath}
+
+    def _log_action(self, action_type, target, result):
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "action": action_type,
+            "target": target,
+            "result": result,
+        }
+        self.log.append(entry)
+        with open(self.log_path, "w") as f:
+            json.dump(self.log, f, indent=2)
+
+    def load_log(self):
+        if os.path.exists(self.log_path):
+            with open(self.log_path, "r") as f:
+                return json.load(f)
+        return []
+
+def execute_plan(plan):
+    """
+    Execute a GPT-generated plan: a list of step dicts.
+    Each step must have:
+      - 'type': either "shell" or "file"
+      - if shell: 'content' = the command
+      - if file:   'path' or 'target' or 'file' + 'content' = new file contents
+    """
+    executor = Executor()
+    for step in plan:
+        t = step.get("type")
+        if t == "shell":
+            executor.run_shell(step.get("content", ""))
+        elif t == "file":
+            path = step.get("path") or step.get("target") or step.get("file")
+            executor.apply_patch(path, step.get("content", ""))
+        else:
+            print(f"[execute_plan] Unknown step type: {t!r}, skipping.")
+
+if __name__ == "__main__":
+    # Simple sanity check
+    exe = Executor(dry_run=False)
+    exe.run_shell("echo 'Executor is live'")
+

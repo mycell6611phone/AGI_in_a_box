@@ -1,0 +1,43 @@
+# === BEGIN PROMPT ===
+You are a senior AI/full-stack engineer.  
+Write a single, runnable Python 3.10 script that builds the following:
+
+────────────────────────────────────────────────────────────────
+HARD REQUIREMENTS
+────────────────────────────────────────────────────────────────
+1. HTTP server: FastAPI (uvicorn) listening on http://localhost:4891
+2. Environment:
+   • Pop!_OS 22.04, Python 3.10, 
+   • `.env` file holding OPENAI_API_KEY
+3. Two LLM endpoints:
+   • remote_chat(message_list)  – calls OpenAI ChatCompletion with my OPENAI_API_KEY    • local_chat(message_list)   – calls Llama-3.1-8B-Instruct-128k via gpt4all
+     Model path = /home/sentinel/.var/app/io.gpt4all.gpt4all/data/nomic.ai/GPT4All/Llama-3.1-8B-Instruct-128k.gguf
+4. Memory:
+   • SQLite (./ai_memory.db) for structured logs  
+   • Chroma or SQLite-VSS for embedding search (store last 100 exchanges)
+5. Tool-call execution:
+   • Accept only JSON {name, arguments} that match a manifest hard-coded in the script  
+   • Log success/fail + stdout/stderr
+6. Workflow (**CLI ping-pong loop, user-breakable**):
+   a) Script starts → CLI prompt `>>> `
+   b) Each user line goes to *remote_chat* (GPT).
+   c) GPT’s reply is forwarded to *local_chat* (Llama) with recent context.
+   d) Local LLM responds (may include tool calls); its response is sent back to GPT.
+   e) Steps c–d repeat automatically until the user types `/exit` or hits `Ctrl-C`.
+   f) Every turn (user → GPT → Llama) is logged to SQLite **and** appended to a plain-text chat-log file that GPT-4All GUI can open.7. Provide:
+   • Curl example for /chat  
+   • Example tool: {"name":"list_dir","arguments":{"path":"/tmp"}}
+
+────────────────────────────────────────────────────────────────
+CODING RULES
+────────────────────────────────────────────────────────────────
+- No external frameworks except:  uvicorn, python-dotenv, openai, gpt4all, chromadb (or sqlite-vss), pydantic, bwrap or subprocess
+- Use async/await where possible
+- Put EVERYTHING (API, memory helpers, tool harness) into one file called ai_n_A_box.py
+- Include a clear README header at the top of the script (usage, setup)
+- The script must run with:  python3 ai_box.py
+- Minimize placeholders; fill in real code
+- Keep comments concise but complete
+
+When finished, output ONLY the code (no markdown fencing, no explanations).
+# === END PROMPT ===

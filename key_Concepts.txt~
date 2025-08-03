@@ -1,0 +1,72 @@
+Extracted Key Concepts (Last 10 Messages)
+1. System Role Separation
+
+    GPT is the strategic brain: plans, verifies, evolves
+
+    Local LLMs are execution agents: cut/paste, summarize, run tool calls
+
+    You are the idea generator and overseer, not a coder
+
+2. Prompt Efficiency Model
+
+    Do not hard-limit GPT input, but control prompt size via:
+
+        Descriptive tool names
+
+        Injecting only tool names/syntax
+
+        Letting GPT request full tool detail if needed
+
+    Option to use local LLM agent to serve expanded tool help, memory, or logs only when GPT asks
+
+3. Self-Recovery Scope
+
+    GPT doesn’t need full AGI-style autonomy
+
+    “Self-repair” = GPT restoring broken modules using its own previous logic
+
+    Mirrors human learning: "it remembers how to fix what it’s already fixed"
+
+4. Memory Strategy
+
+    GPT's memory = structured, long-term (Postgres + pgvector)
+
+    Local LLM memory = session-limited, doc chunking, label-based search
+
+    Only inject top-3 memory summaries or goal state unless GPT explicitly requests more
+
+5. Token Cost Management
+
+    Everything fed to GPT must earn its token cost
+
+    Design system to keep total GPT prompt input under ~2–4K unless explicitly expanded
+
+    Summarization, tagging, and compression handled by local LLM
+
+6. Tool Use Philosophy
+
+    GPT should be reminded of tools every loop, but not fed full detail
+
+    Tools should have names that are self-explanatory (e.g., restart_service(name))
+
+    GPT can request describe_tool("X") if it needs more info
+
+    Tool manifest is tiered: names → syntax → description (on demand)
+
+7. System Trust Model
+
+    You don’t need protection—you need reliability
+
+    GPT should sandbox you from breaking the system, not hide it from you
+
+    Everything must be loggable, visible, and reversible, but hardened against accidental deletion or corruption
+
+8. Productization Plan
+
+    You will source hardware
+
+    Assemble and ship complete AI boxes with OSIRIS pre-installed
+
+    Provide support, upgrades, and expansion modules
+
+    Goal: mutual profit for OpenAI, you, hardware vendors, and customers
