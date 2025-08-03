@@ -5,7 +5,7 @@ from gpt_planner import API_URL, MODEL, SYSTEM_PROMPT  # ensure you have your fu
 from executor import execute_plan
 from retry_handler import RetryHandler
 from feedback_logger import FeedbackLogger
-from tool_call_router import AGENT     # ← import your registry
+from tool_call_router import AGENT  # ← import your registry
 
 class MainLoop:
     def __init__(self):
@@ -38,66 +38,65 @@ class MainLoop:
             {"role": "user",      "content": user_input},
         ]
 
-    # (you’d then pass `convo` into your Chat API call)
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=convo
-    )
-    return response.choices[0].message.content
-
-
+        # (you’d then pass `convo` into your Chat API call)
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=convo
+        )
+        return response.choices[0].message.content
 
         # 2) Loop until we get a valid plan (JSON list) or unrecoverable halt
         plan = None
         while True:
             # Ask GPT (brain) for next action
-           resp  = openai.chat.completions.create(model=MODEL, messages=convo)
-           reply = resp.choices[0].message.content.strip()
+            resp  = openai.chat.completions.create(model=MODEL, messages=convo)
+            reply = resp.choices[0].message.content.strip()
 
             # Try parsing JSON
-           try:
-               payload = json.loads(reply)
-           except json.JSONDecodeError:
-               # Send the raw GPT reply back so it can adjust
-               convo.append({"role":"error", "content": f"Invalid JSON: {reply}"})
-               continue
+            try:
+                payload = json.loads(reply)
+            except json.JSONDecodeError:
+                # Send the raw GPT reply back so it can adjust
+                convo.append({"role": "error", "content": f"Invalid JSON: {reply}"})
+                continue
 
             # If GPT is calling a tool...
-               if isinstance(payload, dict) and "tool" in payload:
-                   fn   = TOOLS.get(payload["tool"])
-                   args = payload.get("args", {})
-               if fn is None:
-                   convo.append({"role":"assistant", "content": f"[{agent} ERROR] unknown tool"})
-                   continue
-               try:
-                   result = fn(**args)
-               except Exception as e:
-                   convo.append({"role":"assistant", "content": f"[{agent} ERROR] {e}"})
-                   continue
-               # feed result back as an assistant message
-                   convo.append({
+            if isinstance(payload, dict) and "tool" in payload:
+                fn   = TOOLS.get(payload["tool"])
+                args = payload.get("args", {})
+                if fn is None:
+                    convo.append({"role": "assistant", "content": f"[{agent} ERROR] unknown tool"})
+                    continue
+                try:
+                    result = fn(**args)
+                except Exception as e:
+                    convo.append({"role": "assistant", "content": f"[{agent} ERROR] {e}"})
+                    continue
+                # feed result back as an assistant message
+                convo.append({
                     "role": "assistant",
                     "content": f"[{agent}] {result}"
                 })
-               continue
+                continue
 
-               # Attempt to invoke the tool
-               try:
-                   result = fn(**args)
-               except Exception as e:                    # Pass the exception back into GPT
-                   convo.append("role":"error", "content": ({f"Error in {agent}: {e}"}))
-                   continue
-                # Feed the tool result back into the convo
-               convo.append({"role":"agent", "name":agent, "content": str(result)})
-               continue
+            # Attempt to invoke the tool
+            try:
+                result = fn(**args)
+            except Exception as e:
+                # Pass the exception back into GPT
+                convo.append({"role": "error", "content": (f"Error in {agent}: {e}")})
+                continue
+            # Feed the tool result back into the convo
+            convo.append({"role": "agent", "name": agent, "content": str(result)})
+            continue
 
             # If GPT returned a plan (list of steps), break out
-           if isinstance(payload, list):
-               plan = payload
-               break
+            if isinstance(payload, list):
+                plan = payload
+                break
 
             # Anything else: ask GPT to clarify
-           convo.append({"role":"error", "content": f"Unexpected payload: {payload}"})
+            convo.append({"role": "error", "content": f"Unexpected payload: {payload}"})
 
         # 3) Execute the plan, with broad exception handling
         print(f"[MainLoop] Executing {len(plan)} steps…")
@@ -105,7 +104,7 @@ class MainLoop:
             execute_plan(plan)
         except Exception as e:
             # Send execution errors back into GPT for repair
-            convo.append({"role":"error", "content": f"Execution failed: {e}"})
+            convo.append({"role": "error", "content": f"Execution failed: {e}"})
             # Let GPT re-enter planning/recovery phase
             return self.run_once(user_input)
 
@@ -121,7 +120,7 @@ if __name__ == "__main__":
     print("[MainLoop] Ready. Type a system-level request or 'exit'.")
     while True:
         ui = input("\n>> ")
-        if ui.strip().lower() in {"exit","quit"}:
+        if ui.strip().lower() in {"exit", "quit"}:
             break
         loop.run_once(ui)
         time.sleep(1)

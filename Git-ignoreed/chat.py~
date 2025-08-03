@@ -1,0 +1,128 @@
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import requests
+try:
+    from gpt4all import GPT4All
+except ImportError:
+    GPT4All = None
+
+# chat_loop.py: Loop between GPT-4o and a local Llama 3.1 3B Instruct 128k model
+# - Starts from a user prompt
+# - Remembers the last 3 exchanges
+# - Runs 2 cycles per pause, then continues, accepts new user input, or exits
+# - Uses OpenAI API and GPT4All (either Python package or HTTP API)
+
+# Load environment variables
+load_dotenv = load_dotenv if 'load_dotenv' in globals() else lambda: None
+load_dotenv()
+
+# Initialize OpenAI client
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise RuntimeError("OPENAI_API_KEY not set in .env")
+client = OpenAI(api_key=openai_api_key)
+
+# GPT4All configuration
+LOCAL_MODEL_PATH = os.getenv("GPT4ALL_MODEL", "llama-3.1-3b-instruct-128k.gguf")
+USE_HTTP = os.getenv("GPT4ALL_USE_HTTP", "false").lower() == "true"
+HTTP_API_URL = os.getenv("GPT4ALL_API_URL", "http://localhost:4891/v1/chat/completions")
+HTTP_MODEL_NAME = os.getenv("GPT4ALL_HTTP_MODEL", LOCAL_MODEL_PATH)
+
+# Instantiate GPT4All package if available and not using HTTP
+local_model = None
+if not USE_HTTP:
+    if GPT4All is None:
+        raise RuntimeError("gpt4all package not installed. Run 'pip install gpt4all'.")
+    try:
+        local_model = GPT4All(LOCAL_MODEL_PATH, allow_download=False)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load GPT4All model '{LOCAL_MODEL_PATH}': {e}")
+
+class ChatLoop:
+    def __init__(self, memory_size: int = 3, cycles_per_pause: int = 2):
+        self.memory_size = memory_size
+        self.cycles_per_pause = cycles_per_pause
+        self.history: list[dict[str, str]] = []
+
+    def call_gpt4o(self, messages: list) -> str:
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        return resp.choices[0].message.content.strip()
+
+    def call_local_llama(self, prompt: str) -> str:
+        if USE_HTTP:
+            payload = {
+                "model": HTTP_MODEL_NAME,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 512,
+                "temperature": 0.7
+            }
+            r = requests.post(HTTP_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            return data["choices"][0]["message"]["content"].strip()
+        else:
+            with local_model.chat_session() as session:
+                return session.generate(
+                    prompt,
+                    max_tokens=512,
+                    temperature=0.7
+                ).strip()
+
+    def assemble_messages(self, user_input: str | None) -> list:
+        msgs = [{"role": "system", "content": "You are GPT-4o, a helpful assistant."}]
+        for exch in self.history:
+            msgs.append({"role": "assistant", "content": exch["gpt4o"]})
+            msgs.append({"role": "user", "content": exch["local"]})
+        if user_input is not None:
+            msgs.append({"role": "user", "content": user_input})
+        elif self.history:
+            msgs.append({"role": "user", "content": self.history[-1]["local"]})
+        else:
+            raise RuntimeError("No input available for GPT-4o call.")
+        return msgs
+
+    def update_history(self, gpt_out: str, local_out: str):
+        self.history.append({"gpt4o": gpt_out, "local": local_out})
+        if len(self.history) > self.memory_size:
+            self.history = self.history[-self.memory_size:]
+
+    def run(self):
+        print("\n=== GPT-4o <-> Llama Loop ===")
+        user_input = input("User prompt: ")
+        if not user_input.strip():
+            print("No prompt provided. Exiting.")
+            return
+
+        cycle_count = 0
+        while True:
+            # GPT-4o call
+            msgs = self.assemble_messages(user_input)
+            gpt_resp = self.call_gpt4o(msgs)
+            print(f"\nGPT-4o:\n{gpt_resp}\n")
+
+            # Llama call
+            local_resp = self.call_local_llama(gpt_resp)
+            print(f"Llama ({LOCAL_MODEL_PATH}):\n{local_resp}\n")
+
+            self.update_history(gpt_resp, local_resp)
+            cycle_count += 1
+
+            if cycle_count >= self.cycles_per_pause:
+                cycle_count = 0
+                choice = input("[Enter]=continue, 'exit'=quit, or new prompt: ")
+                if choice.strip().lower() == 'exit':
+                    print("Exiting loop. Goodbye.")
+                    break
+                if choice.strip():
+                    user_input = choice.strip()
+                    self.history.clear()
+                    print("Starting new prompt cycle.")
+                else:
+                    user_input = None
+
+if __name__ == "__main__":
+    ChatLoop(memory_size=3, cycles_per_pause=2).run()
