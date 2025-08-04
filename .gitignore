@@ -3,6 +3,7 @@ __pycache__/
 Git-ignoreed/
 *.py[codz]
 *$py.class
+apply_clean_patch.py
 
 # C extensions
 *.so
